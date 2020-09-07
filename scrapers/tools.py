@@ -1,4 +1,6 @@
 from json import loads
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import re
 
 
@@ -25,3 +27,12 @@ def parse_js_object(string):
 
     s = '\r\n'.join(ob)
     return loads(s)
+
+
+# iterates over the first days of months in range
+def iterate_months(start_date, end_date):
+    first = datetime(start_date.year, start_date.month, 1)
+    last = datetime(end_date.year, end_date.month, 1)
+    while first <= last:
+        yield first
+        first += relativedelta(months=1)

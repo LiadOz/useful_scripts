@@ -1,3 +1,5 @@
 * Things to add
 ** Scraper config
 A config file to store specific things like when the scraper should be active.
+** possible issue in scraper
+there could be an issue if a visit id becomes bad after logout
