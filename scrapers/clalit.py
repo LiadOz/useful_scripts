@@ -44,7 +44,7 @@ class ClalitScraper(Scraper):
         self.session.post(self.LOGIN_LINK, data=self._create_login_payload())
         self._auth_scheduler()
 
-    def verify_login(self):
+    def _verify_login(self):
         resp = self.session.get(ClalitScraper.SERVICE_LINK)
         if resp.url != ClalitScraper.SERVICE_LINK:
             return False
