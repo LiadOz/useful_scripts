@@ -1,11 +1,11 @@
-import requests
 from bs4 import BeautifulSoup
-from secrets import uid, username, password
 from abstract import Scraper
-from functools import wraps
 from tools import parse_js_object, iterate_months
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+from abstract import _logged_in
+
+from secrets import uid, username, password
 
 class Visit:
     # represents a doctor visit, parsed from BeautifulSoup tag
@@ -31,35 +31,68 @@ class Visit:
 class ClalitScraper(Scraper):
 
     ROOT = 'https://e-services.clalit.co.il'
+    LOGIN_LINK = ROOT + '/OnlineWeb/General/Login.aspx'
     SERVICE_LINK = ROOT + '/OnlineWeb/Services/FamilyHomePage.aspx'
     TAMUZ = ROOT + '/OnlineWeb/Services/Tamuz'
+    COOKIES_FILE = 'clalit.cookies'
 
     def __init__(self):
-        self.session = requests.session()
-        self.session.headers.update({'user-agent': 'Mozilla/5.0'})
-        self.COOKIES_FILE = 'session.cookies'
-        self.LOGIN_LINK = ClalitScraper.ROOT + '/OnlineWeb/General/Login.aspx'
-        self.login()
-        self.auth_scheduler()
+        super().__init__()
+
+    def _login(self):
+        # this method is activated when login function is performed
+        self.session.post(self.LOGIN_LINK, data=self._create_login_payload())
+        self._auth_scheduler()
 
     def verify_login(self):
-        # this could be a decorator
-        # You also may need to check for ZIMUN authorization
         resp = self.session.get(ClalitScraper.SERVICE_LINK)
         if resp.url != ClalitScraper.SERVICE_LINK:
             return False
         return True
 
-    def _logged_in(func):
-        @wraps(func)
-        def wrapper(inst, *args, **kwargs):
-            if not inst.verify_login():
-                inst.login()
-                inst.auth_scheduler()
-            return func(inst, *args, **kwargs)
-        return wrapper
+    @_logged_in
+    # returns all scheduled visits
+    def get_visits(self):
+        site = ClalitScraper.ROOT + '/Zimunet/'
+        soup = BeautifulSoup(self.session.get(site).text, 'html.parser')
+        visits = soup.find('div', {'id': 'visits'}).findAll('li')
+        li = []
+        for tag in visits:
+            try:
+                li.append(Visit(tag))
+            except:
+                pass
+        return li
 
-    def create_login_payload(self):
+    @_logged_in
+    # finds appointments between start_time and end_time
+    # without passing time frame it sets to the next month
+    # blacklist / whitelist is a set of dates (without time!)
+    def find_appointments(self, title=None, subtitle=None,
+                         start_time=datetime.now(),
+                         end_time=datetime.now() + relativedelta(months=1),
+                         blacklist=set(), whitelist=set()):
+        visit = self._find_visit(title, subtitle)
+        data = self._get_visit_data(visit)
+        self.session.headers.update(
+            {'referer': ClalitScraper.ROOT + visit.update_link})
+        result = []
+
+        def filter_date(date):
+            if date.date() in whitelist:
+                return True
+            if date < start_time or date > end_time or date.date() in blacklist:
+                return False
+            return True
+
+        for month in iterate_months(start_time, end_time):
+            for date in \
+                self._get_month_available_days(data, month.month, month.year):
+                days = self._get_day_available_hours(data, date)
+                result.extend([x for x in days if filter_date(x)])
+        return result
+
+    def _create_login_payload(self):
         page = self.session.get(self.LOGIN_LINK)
         soup = BeautifulSoup(page.text, 'html.parser')
 
@@ -80,9 +113,8 @@ class ClalitScraper(Scraper):
 
         return payload
 
-    @_logged_in
     # authorizes the scheduling system in the website
-    def auth_scheduler(self):
+    def _auth_scheduler(self):
         zimun_auth = ClalitScraper.TAMUZ + '/TamuzTransferContentByService.aspx?MethodName=TransferWithAuth'
         form = BeautifulSoup(self.session.get(zimun_auth).text,
                              'html.parser').find('form')
@@ -90,20 +122,6 @@ class ClalitScraper(Scraper):
         for tag in form.findAll('input'):
             payload[tag.get('name')] = tag.get('value')
         self.session.post(ClalitScraper.ROOT + form['action'], data=payload)
-
-    @_logged_in
-    # returns all scheduled visits
-    def get_visits(self):
-        site = ClalitScraper.ROOT + '/Zimunet/'
-        soup = BeautifulSoup(self.session.get(site).text, 'html.parser')
-        visits = soup.find('div', {'id': 'visits'}).findAll('li')
-        li = []
-        for tag in visits:
-            try:
-                li.append(Visit(tag))
-            except:
-                pass
-        return li
 
     def _find_visit(self, title=None, subtitle=None):
         visit = None
@@ -181,30 +199,3 @@ class ClalitScraper(Scraper):
         resp = self.session.get(update_link)
         return self._get_visit_json(BeautifulSoup(
             resp.text, 'html.parser'))['AvailableVisits']
-
-    @_logged_in
-    # finds appointments between start_time and end_time
-    # blacklist / whitelist is a set of dates (without time!)
-    def find_appointments(self, title=None, subtitle=None,
-                         start_time=datetime.now(),
-                         end_time=datetime.now() + relativedelta(months=3),
-                         blacklist=set(), whitelist=set()):
-        visit = self._find_visit(title, subtitle)
-        data = self._get_visit_data(visit)
-        self.session.headers.update(
-            {'referer': ClalitScraper.ROOT + visit.update_link})
-        result = []
-
-        def filter_date(date):
-            if date.date() in whitelist:
-                return True
-            if date < start_time or date > end_time or date.date() in blacklist:
-                return False
-            return True
-
-        for month in iterate_months(start_time, end_time):
-            for date in \
-                self._get_month_available_days(data, month.month, month.year):
-                days = self._get_day_available_hours(data, date)
-                result.extend([x for x in days if filter_date(x)])
-        return result

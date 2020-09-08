@@ -29,7 +29,7 @@ def parse_js_object(string):
     return loads(s)
 
 
-# iterates over the first days of months in range
+# generator to iterate over the first days of months in range
 def iterate_months(start_date, end_date):
     first = datetime(start_date.year, start_date.month, 1)
     last = datetime(end_date.year, end_date.month, 1)
