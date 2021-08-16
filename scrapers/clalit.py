@@ -4,8 +4,14 @@ from tools import parse_js_object, iterate_months
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from abstract import _logged_in
+import json
 
-from secrets import uid, username, password
+with open("/etc/clalit_config.json") as config_file:
+    config = json.load(config_file)
+    uid = config.get('U_ID')
+    username = config.get('USERNAME')
+    password = config.get('PASSWORD')
+
 
 class Visit:
     # represents a doctor visit, parsed from BeautifulSoup tag
@@ -15,8 +21,9 @@ class Visit:
         else:
             self.title = tag.find(class_='doctorName').text
         self.subtitle = tag.find(class_='professionName').text
-        self.date, self.time = [x.text for x in
-                                tag.findAll('span', class_='visitDateTime')]
+        self.date, self.time = [
+            x.text for x in tag.findAll('span', class_='visitDateTime')
+        ]
         self.location = tag.find(class_='underline clinicDetails')['title']
         self.update_link = tag.find(
             class_='updateVisitButton')['data-action-link']
@@ -64,30 +71,82 @@ class ClalitScraper(Scraper):
                 pass
         return li
 
+
     @_logged_in
+    # returns all scheduled visits
+    def find_clinic_visit(self, sched_type, spec_code, clinic_code,
+                          area_id="7", start_time=datetime.now(),
+                          end_time=datetime.now() + relativedelta(months=1),
+                          blacklist=set(), whitelist=set()):
+        if sched_type == "DENTAL":
+            url = "/Zimunet/SmileClinic/SearchSmileClinicsDiaries"
+        if sched_type != "DENTAL":
+            raise ValueError("not implemented")
+
+        payload = {
+            "SelectedSpecializationCode": spec_code,
+            "SelectedAreaId": area_id,
+        }
+        page = self.session.post(
+            ClalitScraper.ROOT + url, data=payload)
+        link = self._find_clinic_link(clinic_code, page)
+        if not link:
+            return []
+        data = self._get_visit_data(link)
+        self.session.headers.update(
+            {'referer': ClalitScraper.ROOT + link})
+        return self._find_appointments(
+            data, start_time, end_time, blacklist, whitelist)
+
+    def _find_clinic_link(self, clinic_code, page):
+        soup = BeautifulSoup(page.json()['data'], 'html.parser')
+        for clinic in soup.find_all("li", class_='diary'):
+            if clinic.a.get('data-cliniccode') == clinic_code:
+                return clinic.find(
+                    'a', {'id': 'CreateVisitButton'}).get('data-action-link')
+
+        next_page = soup.find('a', {'title': "הבא"})
+        if next_page:
+            page = self.session.get(ClalitScraper.ROOT +
+                                    next_page.get('data-action-link'))
+            return self._find_clinic_link(clinic_code, page)
+        else:
+            return ''
+
     # finds appointments between start_time and end_time
     # without passing time frame it sets to the next month
     # blacklist / whitelist is a set of dates (without time!)
-    def find_appointments(self, title=None, subtitle=None,
-                         start_time=datetime.now(),
-                         end_time=datetime.now() + relativedelta(months=1),
-                         blacklist=set(), whitelist=set()):
+    @_logged_in
+    def reschedule_appointment(self,
+                               title=None,
+                               subtitle=None,
+                               start_time=datetime.now(),
+                               end_time=datetime.now() +
+                               relativedelta(months=1),
+                               blacklist=set(),
+                               whitelist=set()):
         visit = self._find_visit(title, subtitle)
-        data = self._get_visit_data(visit)
+        data = self._get_visit_data(visit.update_link)
         self.session.headers.update(
             {'referer': ClalitScraper.ROOT + visit.update_link})
-        result = []
+        return self._find_appointments(data, start_time, end_time,
+                                       blacklist, whitelist)
 
+    @_logged_in
+    def _find_appointments(self, data, start_time, end_time,
+                           blacklist, whitelist):
         def filter_date(date):
             if date.date() in whitelist:
                 return True
-            if date < start_time or date > end_time or date.date() in blacklist:
+            if date < start_time or date > end_time or date.date(
+            ) in blacklist:
                 return False
             return True
 
+        result = []
         for month in iterate_months(start_time, end_time):
-            for date in \
-                self._get_month_available_days(data, month.month, month.year):
+            for date in self._get_month_available_days(data, month.month,
+                                                       month.year):
                 days = self._get_day_available_hours(data, date)
                 result.extend([x for x in days if filter_date(x)])
         return result
@@ -154,19 +213,25 @@ class ClalitScraper(Scraper):
     @_logged_in
     # returns the days in which there is an open appointment
     # this assumes that the header is set to appointment update link
-    def _get_month_available_days(self, data,
+    def _get_month_available_days(self,
+                                  data,
                                   month=datetime.now().month,
                                   year=datetime.now().year):
-        params = {'id': data['visitId'],
-                   'professionType': data['professionType'],
-                   'month': str(month).zfill(2), 'year': year,
-                   'isUpdateVisit': data['isUpdateVisit']}
-        resp = self.session.get(
-            ClalitScraper.ROOT + data['getMonthlyAvailableVisitUrl'],
-            params=params).json()
+        params = {
+            'id': data['visitId'],
+            'professionType': data['professionType'],
+            'month': str(month).zfill(2),
+            'year': year,
+            'isUpdateVisit': data['isUpdateVisit']
+        }
+        resp = self.session.get(ClalitScraper.ROOT +
+                                data['getMonthlyAvailableVisitUrl'],
+                                params=params).json()
         if not resp['errorType']:
-            return [datetime.strptime(date, '%d.%m.%Y')
-                    for date in resp['data']['availableDays']]
+            return [
+                datetime.strptime(date, '%d.%m.%Y')
+                for date in resp['data']['availableDays']
+            ]
         return []
 
     @_logged_in
@@ -174,28 +239,29 @@ class ClalitScraper(Scraper):
     # this assumes that the header is set to appointment update link
     def _get_day_available_hours(self, data, date):
         day, month, year = date.day, date.month, date.year
-        params = {'id': data['visitId'],
-                'professionType': data['professionType'],
-                'day': str(day).zfill(2),
-                'month': str(month).zfill(2),
-                'year': year,
-                'isUpdateVisit': data['isUpdateVisit']}
+        params = {
+            'id': data['visitId'],
+            'professionType': data['professionType'],
+            'day': str(day).zfill(2),
+            'month': str(month).zfill(2),
+            'year': year,
+            'isUpdateVisit': data['isUpdateVisit']
+        }
         get_url = ClalitScraper.ROOT + data['getDailyAvailableVisitUrl']
         resp = self.session.get(get_url, params=params).json()['data']
         soup = BeautifulSoup(resp['dailyAvailableVisits'], 'html.parser')
         items = []
         for item in soup.findAll('li'):
             time = item.span.text.strip().split(':')
-            items.append(date + timedelta(
-                hours=int(time[0]), minutes=int(time[1])))
+            items.append(date +
+                         timedelta(hours=int(time[0]), minutes=int(time[1])))
         return items
 
-
     @_logged_in
-    def _get_visit_data(self, visit):
-        self.session.headers.update({'referer':
-                                     ClalitScraper.ROOT + '/Zimunet/'})
-        update_link = ClalitScraper.ROOT + visit.update_link
+    def _get_visit_data(self, link):
+        self.session.headers.update(
+            {'referer': ClalitScraper.ROOT + '/Zimunet/'})
+        update_link = ClalitScraper.ROOT + link
         resp = self.session.get(update_link)
         return self._get_visit_json(BeautifulSoup(
             resp.text, 'html.parser'))['AvailableVisits']
