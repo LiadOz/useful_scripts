@@ -80,7 +80,7 @@ class ClalitScraper(Scraper):
                           blacklist=set(), whitelist=set()):
         if sched_type == "DENTAL":
             url = "/Zimunet/SmileClinic/SearchSmileClinicsDiaries"
-        if sched_type != "DENTAL":
+        else:
             raise ValueError("not implemented")
 
         payload = {
@@ -93,6 +93,7 @@ class ClalitScraper(Scraper):
         if not link:
             return []
         data = self._get_visit_data(link)
+        self.login()
         self.session.headers.update(
             {'referer': ClalitScraper.ROOT + link})
         return self._find_appointments(
