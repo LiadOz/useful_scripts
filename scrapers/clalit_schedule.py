@@ -5,7 +5,7 @@ from clalit import ClalitScraper
 from clalit_utils import get_jobs, remove_entry
 from telegram_utils import TelegramNotifier
 
-POLL_TIME = 5
+POLL_TIME = 5 * 60
 REPORTED_VISITS = 10
 
 
@@ -36,7 +36,6 @@ def find_visits(c_scraper):
 
 def main():
     c_scraper = ClalitScraper()
-    find_visits(c_scraper)
     while True:
         if 7 <= datetime.now().hour < 24:
             try:
