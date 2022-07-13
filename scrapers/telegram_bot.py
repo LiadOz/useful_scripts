@@ -6,7 +6,9 @@ from telegram.ext import (
         PicklePersistence
 )
 from telegram_utils import get_token
-from clalit_utils import add_job, verify_job_msg, remove_entry
+from clalit_utils import (
+        add_job, verify_job_msg, remove_entry, server_is_up, get_previous_job
+)
 
 
 async def start(update, context):
@@ -15,18 +17,20 @@ async def start(update, context):
 
 
 async def help(update, context):
-    message = """type /schedule {visit_json} to start looking for new visits
+    message = """/schedule {visit_json} to start looking for new visits
+example command: /schedule {"clinic_id": "865179", "doctor_code": "92"}
     visit_json must contain:
         - clinic_id
         - doctor_code
     Example Codes:
-        - clinic_id = '865179'
-        - doctor_code = '91' dentist
-        - doctor_code = '92' dental hygienist
-
+        - clinic_id = "865179"
+        - doctor_code = "91" dentist
+        - doctor_code = "92" dental hygienist
     Only dental schedules are supported
 
-    type /unschedule to remove schedule request
+/unschedule removes schedule request
+/is_up verifies schedule server is running
+/reschedule repeat last schedule command
     """
     await update.message.reply_text(message)
 
@@ -34,6 +38,13 @@ async def help(update, context):
 async def hello(update: Update, context) -> None:
     msg = f'Hello {update.effective_user.first_name}'
     await update.message.reply_text(msg)
+
+
+async def is_up(update: Update, context) -> None:
+    if server_is_up():
+        await update.message.reply_text('Everything looks fine')
+    else:
+        await update.message.reply_text('Schedule server is down')
 
 
 async def unschedule(update: Update, context) -> None:
@@ -65,6 +76,17 @@ async def schedule(update: Update, context) -> None:
     await update.message.reply_text(f"Schdule started {message}")
 
 
+async def reschedule(update: Update, context) -> None:
+    chat_id = update.message.chat_id
+    previous_job = get_previous_job(chat_id)
+    if not previous_job:
+        await update.message.reply_text("Can't reschedule no previous job found")
+        return
+
+    add_job(chat_id, job_data=previous_job)
+    await update.message.reply_text("Rescheduled with previous job")
+
+
 persistance = PicklePersistence('telegram_persistance_file')
 app = ApplicationBuilder() \
         .token(get_token()) \
@@ -74,7 +96,9 @@ app = ApplicationBuilder() \
 app.add_handler(CommandHandler("hello", hello))
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("help", help))
+app.add_handler(CommandHandler("is_up", is_up))
 app.add_handler(CommandHandler("schedule", schedule))
+app.add_handler(CommandHandler("reschedule", reschedule))
 app.add_handler(CommandHandler("unschedule", unschedule))
 
 app.run_polling()

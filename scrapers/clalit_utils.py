@@ -1,12 +1,17 @@
 import json
+import subprocess
 
 
 JOB_FILE = 'clalit_jobs.json'
+LAST_JOB_FILE = 'clalit_user_previous_job.json'
 
 
-def get_jobs():
+def get_jobs(from_previous_jobs=False):
+    file = JOB_FILE
+    if from_previous_jobs:
+        file = LAST_JOB_FILE
     try:
-        with open(JOB_FILE, 'r') as f:
+        with open(file, 'r') as f:
             return json.loads(f.read())
     except FileNotFoundError:
         return []
@@ -22,6 +27,30 @@ def add_job(chat_id, job_data):
     with open(JOB_FILE, 'w') as f:
         json.dump(jobs, f)
 
+    add_job_to_previous_jobs(chat_id, job_data=job_data)
+
+
+def add_job_to_previous_jobs(chat_id, job_data):
+    previous_jobs = get_jobs(True)
+    found_job = False
+    for job in previous_jobs:
+        if job['chat_id'] == chat_id:
+            for k, v in job_data.items():
+                job[k] = v
+                found_job = True
+    if not found_job:
+        previous_jobs.append(job_data)
+    with open(LAST_JOB_FILE, 'w') as f:
+        json.dump(previous_jobs, f)
+
+
+def get_previous_job(chat_id):
+    previous_jobs = get_jobs(True)
+    for job in previous_jobs:
+        if job['chat_id'] == chat_id:
+            return job
+    return None
+
 
 def remove_entry(chat_id):
     jobs = get_jobs()
@@ -29,6 +58,13 @@ def remove_entry(chat_id):
     with open(JOB_FILE, 'w') as f:
         json.dump(new_jobs, f)
 
+
+def server_is_up():
+    ps_result = subprocess.getstatusoutput('ps aux | grep clalit')
+    processes = ps_result[1].split('\n')
+    if len(processes) > 2:
+        return True
+    return False
 
 
 def verify_job_msg(msg):

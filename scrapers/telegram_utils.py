@@ -16,4 +16,5 @@ class TelegramNotifier:
 
     def send_msg(self, chat_id, text):
         url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        requests.get(url, params={'CHAT_ID': chat_id, 'text': text})
+        resp = requests.get(url, params={'chat_id': chat_id, 'text': text})
+        print(resp)
