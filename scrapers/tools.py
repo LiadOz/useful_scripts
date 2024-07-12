@@ -25,6 +25,8 @@ def parse_js_object(string):
         parsed = f"{m.group(1)}\"{m.group(2)}\":{m.group(3)}{last}"
         ob.append(parsed)
 
+    if ob[-3][-1] == ',':  # remove the last ',' in the last json entry
+        ob[-3] = ob[-3][:-1]
     s = '\r\n'.join(ob)
     return loads(s)
 

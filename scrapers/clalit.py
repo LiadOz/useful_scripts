@@ -1,3 +1,4 @@
+import re
 from bs4 import BeautifulSoup
 from abstract import Scraper
 from tools import parse_js_object, iterate_months
@@ -181,7 +182,7 @@ class ClalitScraper(Scraper):
         payload = {}
         for tag in form.findAll('input'):
             payload[tag.get('name')] = tag.get('value')
-        self.session.post(ClalitScraper.ROOT + form['action'], data=payload)
+        self.session.post(f"{ClalitScraper.ROOT}/{form['action']}", data=payload)
 
     def _find_visit(self, title=None, subtitle=None):
         visit = None
@@ -196,19 +197,9 @@ class ClalitScraper(Scraper):
             if 'availableDays' in str(script):
                 parse = script
                 break
-        # remove a trailing comma
-        string = []
-        found = False
-        for line in str(script).splitlines()[::-1]:
-            if not found and line and line[-1] == ',':
-                string.append(line[:-1])
-                found = True
-            else:
-                string.append(line)
-        string.reverse()
-        string = '\r\n'.join(string)
 
-        j = parse_js_object(string)
+        result = re.search(r'z.init(.*);', parse.text, re.DOTALL).group(1)
+        j = parse_js_object(result)
         return j
 
     @_logged_in
