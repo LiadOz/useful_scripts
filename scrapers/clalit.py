@@ -102,7 +102,7 @@ class ClalitScraper(Scraper):
     def _find_clinic_link(self, clinic_code, page):
         soup = BeautifulSoup(page.json()['data'], 'html.parser')
         for clinic in soup.find_all("li", class_='diary'):
-            if clinic.a.get('data-cliniccode') == clinic_code:
+            if clinic.find_all('span')[0].text.strip() == clinic_code:
                 return clinic.find(
                     'a', {'id': 'CreateVisitButton'}).get('data-action-link')
 
